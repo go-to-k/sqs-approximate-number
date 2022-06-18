@@ -1,0 +1,94 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: ---
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Stack Name"
+        Parameters:
+          - StackName
+    ParameterGroups:
+      - Label:
+          default: "MessageRetentionPeriod"
+        Parameters:
+          - MessageRetentionPeriod
+
+Parameters:
+  StackName:
+    Type: String
+  MessageRetentionPeriod:
+    Type: Number
+
+Resources: 
+  EventSourceQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${StackName}-Queue"
+      MessageRetentionPeriod: !Ref MessageRetentionPeriod #sec
+
+  EventSourceQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref EventSourceQueue
+      PolicyDocument:
+        Statement:
+          - Action:
+              - "SQS:*"
+            Effect: "Allow"
+            Resource: !GetAtt EventSourceQueue.Arn
+            Principal:
+              Service: "s3.amazonaws.com"
+
+  Bucket:
+    Type: AWS::S3::Bucket
+    DependsOn:
+      - EventSourceQueuePolicy
+    Properties:
+      BucketName: !Sub "${StackName}-bucket"
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Event: s3:ObjectCreated:*
+            Queue: !GetAtt EventSourceQueue.Arn
+          - Event: s3:ObjectRemoved:*
+            Queue: !GetAtt EventSourceQueue.Arn
+
+  QueueSizeAlarmByNumberOfMessagesSent:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${StackName}-QueueSizeAlarmByNumberOfMessagesSent"
+      Namespace: AWS/SQS
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt EventSourceQueue.QueueName
+      MetricName: NumberOfMessagesSent
+      Period: 60
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Statistic: "Sum"
+      Threshold: 1
+      TreatMissingData: notBreaching
+
+  QueueSizeAlarmByApproximateNumberOfMessagesVisible:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${StackName}-QueueSizeAlarmByApproximateNumberOfMessagesVisible"
+      Namespace: AWS/SQS
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt EventSourceQueue.QueueName
+      MetricName: ApproximateNumberOfMessagesVisible
+      Period: 60
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Statistic: "Sum"
+      Threshold: 1
+      TreatMissingData: notBreaching
